@@ -1,0 +1,79 @@
+HELP.md
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Local application configuration
+application-local.properties
+application-local.yml
+application-local.yaml
+
+# Log files
+*.log
+logs/
+
+# Temporary and OS files
+.DS_Store
+Thumbs.db
+
+# Local test dependencies and generated reports
+verification/**/node_modules/
+verification/**/reports/
+verification/**/classpath.txt
+verification/**/evidence.txt
+verification/**/run.log
+verification/**/apifox.log
+
+# DEV-030: keep machine-specific credentials out of the first commit.
+# Copy application-example.properties to application.properties on a new checkout.
+/src/main/resources/application.properties
+
+# Local verification dependency cache and runtime state.
+/verification/apifox/cli/store/
+/verification/apifox/runtime-local.json
+/verification/apifox/format-probe.json
+
+# Generated verification evidence and test reports (keep authored scripts/docs).
+/verification/**/*.txt
+/verification/**/*.xml
+/verification/**/*.dumpstream
+/verification/**/*-surefire/
+/verification/**/artifact-check.json
+
+# Historical source backups generated during verification
+verification/**/before/
+verification/**/before-src/
