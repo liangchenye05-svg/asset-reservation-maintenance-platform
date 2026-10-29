@@ -5,7 +5,6 @@ import com.example.equipmentmanagement.dto.CreateRepairOrderRequest;
 
 import com.example.equipmentmanagement.service.RepairOrderService;
 import com.example.equipmentmanagement.entity.RepairOrder;
-import org.apache.ibatis.annotations.Update;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -28,10 +27,10 @@ public class RepairOrderController {
     @GetMapping
     public List<RepairOrder> getRepairOrders(
             @AuthenticationPrincipal Integer currentUserId,
-            Authentication authentication) {
+            Authentication authentication, @RequestParam(required = false) String status) {
         boolean isAdmin = authentication.getAuthorities().stream()
                 .anyMatch(a -> a.getAuthority().equals("ROLE_ADMIN"));
-        return repairOrderService.getRepairOrders(currentUserId, isAdmin);
+        return repairOrderService.getRepairOrders(currentUserId, isAdmin,status);
     }
 
     @GetMapping("/{id}")

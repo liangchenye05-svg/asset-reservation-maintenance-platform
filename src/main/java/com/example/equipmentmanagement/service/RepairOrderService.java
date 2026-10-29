@@ -53,12 +53,19 @@ public class RepairOrderService {
         return rows;
     }
 
-    public List<RepairOrder> getRepairOrders(Integer currentUserId, boolean isAdmin) {
+    public List<RepairOrder> getRepairOrders(Integer currentUserId, boolean isAdmin,String status) {
         if (currentUserId == null || currentUserId <= 0) {
             throw new IllegalArgumentException("用户身份不合法");
         }
-        return isAdmin ? repairOrderMapper.getAllRepairOrders()
-                : repairOrderMapper.getRepairOrdersByUserId(currentUserId);
+
+        if(status!=null) {
+            if (!"PENDING".equals(status) && !"PROCESSING".equals(status) && !"COMPLETED".equals(status)) {
+                throw new IllegalArgumentException("状态不合法");
+            }
+        }
+
+        return isAdmin ? repairOrderMapper.getAllRepairOrders(status)
+                : repairOrderMapper.getRepairOrdersByUserId(currentUserId,status);
     }
 
     public RepairOrder getRepairOrder(int id, Integer currentUserId, boolean isAdmin) {
