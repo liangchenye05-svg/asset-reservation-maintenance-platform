@@ -77,3 +77,77 @@ verification/**/apifox.log
 # Historical source backups generated during verification
 verification/**/before/
 verification/**/before-src/
+# Local historical verification workspace (kept on disk, not required to run tests).
+/verification/
+/DEV-027_RESERVATION_CANCEL_VERIFICATION.md
+/DEV-029_FULL_REGRESSION_REPORT.md
+/RESERVATION_IDENTITY_VERIFICATION.md
+
+# Private keys, database dumps and heap dumps must not enter public source.
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.sql.gz
+*.dump
+*.hprof
+*.bak
+
+# Machine-specific Spring overrides; keep reviewed examples in version control.
+/application.properties
+/application.yml
+/application.yaml
+/config/application.properties
+/config/application.yml
+/config/application.yaml
+/src/main/resources/application.yml
+/src/main/resources/application.yaml
+/src/main/resources/application-dev.properties
+/src/main/resources/application-dev.yml
+/src/main/resources/application-dev.yaml
+/src/main/resources/application-prod.properties
+/src/main/resources/application-prod.yml
+/src/main/resources/application-prod.yaml
+!/src/main/resources/application-example.properties
+!/schema.sql
+
+# Private IDE run configurations and local data/backup directories.
+/.run/
+/config/local/
+/private/
+/local-data/
+/database-backups/
+/*-backup.sql
+/*-dump.sql
+/database.sql
+
+# Root-level build/distribution copies are local artifacts, not source.
+/*.jar
+/*.war
+/*.zip
+/*.tar.gz
+
+# Local audit/revalidation workspaces if copied into this repository.
+/audit-stage1/
+/revalidation/
+/p0-preparation/
+/p0-revision/
+
+# Private publication reviews: keep identity maps and raw evidence outside source.
+/anonymous-plan/
+/anonymous-release/
+/content-preparation/
+/local-review/
+/ANONYMIZATION_REPORT.md
+/ANONYMIZED_COPY_VALIDATION.json
+/CONTENT_SECURITY_CHECK.json
+/ANONYMITY_VALIDATION.json
+/P0_SECURITY_CHECK.md
+/P0_COMMIT_PLAN.md
+/FINAL_REVIEW.md
+/FINAL_COMMIT_MANIFEST.json
+/FINAL_VERIFICATION.json
+/COMMIT_ID_MAP.json
+/COMMIT_ID_MAP.md
