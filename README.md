@@ -1,8 +1,36 @@
-# 设备管理系统后端
+# 设备预约与工单管理平台
+
+公开维护者：**Sweetest**。本项目使用开发者昵称及 GitHub noreply 提交身份；不提供私人联系方式。
 
 基于 Spring Boot、MyBatis 和 MySQL 的设备管理 REST API，覆盖设备台账、设备预约、用户认证与维修工单四类业务。通过 JWT 识别当前用户，通过 USER / ADMIN 角色和记录归属控制访问，并对预约审批、取消及维修状态变更进行并发一致性处理。
 
-这是后端学习与求职展示项目；当前仓库没有前端页面，也没有 Swagger / OpenAPI 页面。本文以实际源码、`pom.xml`、配置示例及数据库结构为准。交付验证详情见 [DEV-030_DELIVERY_REPORT.md](DEV-030_DELIVERY_REPORT.md)。本机已有的 `DEV-029_FULL_REGRESSION_REPORT.md` 是历史参考，不是启动依赖。
+这是 Java 后端学习与实习求职展示项目，包含随 Spring Boot 提供的 HTML/CSS/JavaScript 演示端。普通用户可以预约设备、查看个人记录和报修；管理员可以维护设备、审批或拒绝预约、处理维修工单。页面调用真实业务接口，需要启动后端并配置 MySQL。
+
+项目重点：
+
+- **服务端身份与数据权限**：从 JWT 认证上下文获取创建人，普通用户只能查询本人预约和工单，后端校验详情归属。
+- **预约审批并发一致性**：READ_COMMITTED 事务、设备行锁、加锁后重读与时间冲突检查，避免重叠预约被并发批准。
+- **状态流转约束**：携带旧状态的条件 UPDATE，结合受影响行数校验，防止重复处理和非法跳步。
+- **真实接口演示**：用户界面、管理员工作台以及业务失败提示；不依赖前端框架或 npm 构建。
+- **可核查的测试**：60 个测试方法；默认执行 26 个，另有 34 个真实 MySQL 集成测试需显式启用。
+
+[页面与演示说明](docs/FRONTEND_GUIDE.md) · [架构与业务流程](docs/ARCHITECTURE.md) · [GitHub 发布说明](docs/GITHUB_RELEASE.md)
+
+## 页面预览
+
+以下为独立测试库中的真实页面截图，使用临时演示账号和设备数据；截图账号已清理，不能直接用于登录新下载的项目。
+
+### 设备资源
+
+![设备资源列表](docs/images/devices.jpg)
+
+### 预约记录与审批
+
+![预约记录](docs/images/reservations.jpg)
+
+![管理员审批工作台](docs/images/admin.jpg)
+
+登录页见 [截图](docs/images/login.jpg)，完整演示顺序见 [前端说明](docs/FRONTEND_GUIDE.md)。
 
 ## 技术栈与结构
 
@@ -22,12 +50,13 @@ src/main/java/com/example/equipmentmanagement/
   service/       参数校验、业务规则与事务
   mapper/        MyBatis 注解 SQL
   entity/        数据实体
-  dto/           注册、登录、报修请求
+  dto/           注册、登录、预约、报修请求及当前用户响应
   config/        Spring Security 配置
   security/      JWT 认证过滤器
   util/          JWT 生成与解析
   exception/     异常及 HTTP 状态映射
   common/        分页响应
+src/main/resources/static/     同源 HTML/CSS/JavaScript 演示端
 src/main/resources/application-example.properties
 src/test/java/   默认测试与显式启用的集成测试
 schema.sql       手动导入的纯表结构脚本
@@ -38,11 +67,11 @@ schema.sql       手动导入的纯表结构脚本
 | 业务 | 已实现能力及边界 |
 | --- | --- |
 | 设备台账 | 按 ID、状态、分页查询；管理员新增、修改、删除。分页按 ID 升序，页码从 1 开始，`pageSize` 为 1–100。新增设备状态由数据库默认设为 `AVAILABLE`；修改接口仅修改名称、位置、型号，不修改设备编码或状态。被外键引用的设备删除返回 409。 |
-| 设备预约 | 当前登录用户创建预约，初始 `PENDING`；管理员审批为 `APPROVED`；本人或管理员在开始时间前可取消 `PENDING` / `APPROVED` 预约，转为 `CANCELLED`。冲突只计算同设备的 `APPROVED` 记录，条件为 `start_time < 新结束时间 AND end_time > 新开始时间`，因此首尾相接允许，多个重叠待审批申请可能共存。审批与取消使用事务、设备行锁及条件更新。 |
+| 设备预约 | 当前登录用户创建预约，初始 `PENDING`；管理员批准为 `APPROVED` 或拒绝为 `REJECTED`；支持分页、状态/设备筛选、按归属查询详情；本人或管理员在开始时间前可取消 `PENDING` / `APPROVED` 预约，转为 `CANCELLED`。冲突只计算同设备的 `APPROVED` 记录，条件为 `start_time < 新结束时间 AND end_time > 新开始时间`，因此首尾相接允许，多个重叠待审批申请可能共存。审批与取消使用事务、设备行锁及条件更新。 |
 | 用户认证 | 注册、BCrypt 密码散列、登录签发 JWT；注册固定普通用户角色，不接受客户端指定 ADMIN。JWT subject 保存用户 ID；每次认证读取数据库中的当前用户与角色。示例过期时间为 3,600,000 毫秒（1 小时）。 |
-| 维修工单 | 当前用户报修，初始 `PENDING`；管理员受理为 `PROCESSING`，再完成为 `COMPLETED`；带旧状态条件的更新防止并发重复流转。USER 列表仅本人、详情按归属校验；ADMIN 可查询全部，列表按 ID 倒序。 |
+| 维修工单 | 当前用户报修，初始 `PENDING`；管理员受理为 `PROCESSING`，再完成为 `COMPLETED`；带旧状态条件的更新防止并发重复流转。USER 列表仅本人、详情按归属校验；ADMIN 可查询全部。后端支持可选 `status` 筛选，列表按 ID 倒序；当前 Web 页面仍在获取列表后于浏览器内筛选。 |
 
-预约和工单的创建人由服务端当前身份确定，不能通过请求中的 `userId` 冒用他人。预约、工单初始状态均不由客户端决定。当前没有预约列表/详情接口、预约拒绝接口、工单取消接口、用户管理或角色提升 API。
+预约和工单的创建人由服务端当前身份确定，不能通过请求中的 `userId` 冒用他人。预约、工单初始状态均不由客户端决定。已提供预约列表、详情和拒绝接口；当前没有工单取消、用户管理或角色提升 API。
 
 ## 权限
 
@@ -52,9 +81,10 @@ schema.sql       手动导入的纯表结构脚本
 | 设备查询 | 401 | 允许 | 允许 |
 | 设备新增、修改、删除 | 401 | 403 | 允许 |
 | 创建预约、创建报修 | 401 | 以本人身份创建 | 以本人身份创建 |
-| 审批预约、受理/完成工单 | 401 | 403 | 允许 |
+| 批准/拒绝预约、受理/完成工单 | 401 | 403 | 允许 |
 | 取消预约 | 401 | 仅本人，且满足时间/状态条件 | 可取消他人，但仍受时间/状态条件限制 |
-| 查询工单 | 401 | 列表仅本人；他人详情 403 | 全部 |
+| 查询预约/工单 | 401 | 列表仅本人；他人详情 403 | 全部 |
+| 当前用户 `/users/me` | 401 | 仅必要身份字段 | 仅必要身份字段 |
 
 受保护接口使用 `Authorization: Bearer <本地登录得到的JWT>`。应用使用无状态认证，禁用表单登录、HTTP Basic 和 CSRF；当前没有刷新令牌、注销/令牌黑名单功能。令牌无效、过期或对应用户不存在时返回 401。上述公开入口指无无效 Authorization 头的请求；主动携带无效 JWT 仍可能先被过滤器拒绝。
 
@@ -67,7 +97,7 @@ schema.sql       手动导入的纯表结构脚本
 进入项目根目录，**新检出且本地配置不存在时**复制示例；已有配置请保留，不要覆盖：
 
 ```powershell
-Set-Location D:\java\equipment-management
+Set-Location '你的项目目录'
 if (!(Test-Path src\main\resources\application.properties)) {
     Copy-Item src\main\resources\application-example.properties src\main\resources\application.properties
 }
@@ -101,7 +131,7 @@ $env:JWT_SECRET = [Convert]::ToBase64String($keyBytes)
 CREATE DATABASE equipment_management
   CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci;
 USE equipment_management;
-SOURCE D:/java/equipment-management/schema.sql;
+SOURCE <项目目录的绝对路径，使用正斜杠>/schema.sql;
 SHOW TABLES;
 ```
 
@@ -132,7 +162,7 @@ WHERE username = '<你刚注册的专用管理员用户名>' AND role = 'USER';
 .\mvnw.cmd spring-boot:run '-Dspring-boot.run.arguments=--server.address=127.0.0.1'
 ```
 
-默认端口为 8080，接口地址为 `http://127.0.0.1:8080`。访问 `/` 不提供首页，匿名访问受保护接口返回 401 属于预期。端口冲突时可在本地配置设置 `server.port`。
+默认端口为 8080，接口地址为 `http://127.0.0.1:8080`。访问 `/` 显示设备协作台登录页；匿名访问受保护业务接口返回 401 属于预期。端口冲突时可在本地配置设置 `server.port`。
 
 也可以构建并运行 JAR（默认构建会按下文默认规则运行测试）：
 
@@ -159,16 +189,22 @@ java -jar target\equipment-management-0.0.1-SNAPSHOT.jar --server.address=127.0.
 | `POST /devices` | ADMIN | `deviceCode`、`name`、`location`，可选 `model` | 整数 `1` |
 | `PUT /devices/{id}` | ADMIN | `name`、`location`，可选 `model` | 整数 `1` |
 | `DELETE /devices/{id}` | ADMIN | 路径 ID | 整数 `1` |
-| `POST /reservations` | USER/ADMIN | `deviceId`、`startTime`、`endTime` | 整数 `1` |
+| `POST /reservations` | USER/ADMIN | `deviceId`、`startTime`、`endTime` | HTTP 201，保存后的预约对象，含新ID和Location |
+| `GET /reservations`（别名 `/reservations/page`） | USER本人/ADMIN全部 | page、pageSize、可选status/deviceId | `{total,page,pageSize,records}` |
+| `GET /reservations/{id}` | 本人/ADMIN | 正整数预约ID | 预约详情 |
+| `GET /users/me` | 已登录 | 无 | `{id,username,role}` |
 | `PUT /reservations/{id}/approve` | ADMIN | 路径预约 ID，无需请求体 | 整数 `1` |
+| `PUT /reservations/{id}/reject` | ADMIN | 路径预约 ID，无需请求体 | 整数 `1` |
 | `PUT /reservations/{id}/cancel` | 本人/ADMIN | 路径预约 ID，无需请求体 | 整数 `1` |
 | `POST /repair-orders` | USER/ADMIN | `deviceId`、`description` | 整数 `1` |
-| `GET /repair-orders` | USER/ADMIN | 无 | 工单数组，按权限过滤 |
+| `GET /repair-orders` | USER/ADMIN | 可选 `status`：PENDING / PROCESSING / COMPLETED | 工单数组，按权限及状态过滤，ID 倒序 |
 | `GET /repair-orders/{id}` | 本人/ADMIN | 路径工单 ID | 工单对象 |
 | `PUT /repair-orders/{id}/process` | ADMIN | 路径工单 ID，无需请求体 | 整数 `1` |
 | `PUT /repair-orders/{id}/complete` | ADMIN | 路径工单 ID，无需请求体 | 整数 `1` |
 
-这些整数 `1` 是受影响行数，**不是新记录 ID**；没有统一的 `{code,message,data}` 响应封装。创建类接口目前也不返回 `Location`。查询设备列表/工单列表可以获得相应 ID；预约目前缺少查询 API，调试时需在自己的开发库查询新建预约 ID。
+`GET /repair-orders` 不传 `status` 时返回当前身份可访问的全部工单；传入 `PENDING`、`PROCESSING` 或 `COMPLETED` 时只返回该状态。参数区分大小写，未知值、小写、空字符串（`status=`）和空白值均返回 HTTP 400，正文为“状态不合法”；合法状态没有匹配记录时返回 HTTP 200 和 `[]`。筛选不能扩大普通用户的数据范围。当前页面的工单下拉框仍使用浏览器内筛选，尚未把该参数发送给后端；服务端分页和设备筛选尚未实现。
+
+除预约创建接口外，其余写接口的整数 `1` 是受影响行数，**不是新记录 ID**；没有统一的 `{code,message,data}` 响应封装。预约创建返回201和资源Location。查询设备列表/工单列表可以获得相应 ID；预约创建已返回新记录ID，预约分页及详情可通过API查询，无需手工SQL获取预约ID。
 
 预约时间使用不带时区的本地时间格式，如 `2030-01-02T09:00:00`，要求开始时间早于结束时间。当前未实现“必须在未来创建预约”或“只允许 AVAILABLE 设备预约”的额外限制，不应据此作业务承诺。报修描述必填、非空白且服务校验 `String.length() <= 500`。
 
@@ -179,7 +215,7 @@ java -jar target\equipment-management-0.0.1-SNAPSHOT.jar --server.address=127.0.
 在项目根目录执行。PowerShell 中将 `-D...` 参数整体加引号：
 
 ```powershell
-# 默认：18 项实际执行，32 项按条件跳过
+# 默认：26 项实际执行，34 项按条件跳过
 mvn test
 # 使用 Wrapper 的等价入口
 .\mvnw.cmd test
@@ -191,14 +227,31 @@ mvn test
 | 测试类 | 方法数 | 默认执行 | 验证方式/启用开关 |
 | --- | ---: | ---: | --- |
 | `EquipmentManagementApplicationTests` | 1 | 1 | 应用上下文装配；不能据此声称真实数据库业务已验证 |
-| `JwtAuthenticationIntegrationTest` | 14 | 14 | 嵌入式服务与真实 HTTP，数据库 Mapper 使用 mock |
+| `JwtAuthenticationIntegrationTest` | 16 | 16 | 嵌入式服务与真实 HTTP，数据库 Mapper 使用 mock |
 | `JwtUtilTest` | 3 | 3 | JWT 单元测试 |
-| `FullRegressionIntegrationTest` | 11 | 0 | 真实 HTTP + 独立 MySQL 库；`full.regression.it=true` |
+| `ReservationQueryTest` | 6 | 6 | Mockito 验证查询范围、分页边界、状态和归属 |
+| `FullRegressionIntegrationTest` | 13 | 0 | 真实 HTTP + 独立 MySQL 库；`full.regression.it=true` |
 | `ReservationIdentityBindingIntegrationTest` | 5 | 0 | MockMvc + 配置的真实 MySQL 库，事务回滚；`reservation.identity.it=true` |
 | `ReservationCancelOwnershipIntegrationTest` | 16 | 0 | 真实 HTTP + 独立 MySQL 库；`reservation.cancel.it=true` |
-| **合计** | **50** | **18** | **默认跳过 32；三开关全开才执行 50** |
+| **合计** | **60** | **26** | **默认跳过 34；三开关全开才执行 60** |
 
-本次 DEV-030 实测：`mvn test` 为 50 项发现、18 项执行通过、32 项跳过；Wrapper 全开命令为 **50 项通过、0 失败、0 错误、0 跳过**。这与历史 DEV-029 的最终报告一致，但本次另行实际复验，未直接照抄历史成绩。
+当前源码共 60 个测试方法。默认命令执行 26 个、跳过 34 个；全量命令需满足下列数据库前提。根目录 DEV-030 报告保留的是此前 50 项测试的历史记录，不能作为当前测试数量。
+
+### 最近一次功能复验（2026-10-30）
+
+| 范围 | 实际结果 |
+| --- | --- |
+| 默认自动化测试 | 60 项发现，26 项执行通过，34 项按条件跳过；0 失败、0 错误 |
+| 全量自动化测试 | 三个集成测试开关全部启用；60 项执行通过，0 失败、0 错误、0 跳过 |
+| 独立 HTTP 验收 | 82 次请求：70 次核心验收、8 次分页夹具准备、4 次页面结果持久化核对；状态及数据断言符合预期，不将请求数相加到 JUnit 方法数 |
+| 浏览器验收 | 31 项通过；另有 1 次加载中采集由等待加载完成后的重验替代，1 项窄屏视口设置未生效而未完成 |
+| 数据和代码保护 | 当前服务使用专用临时数据并在验收后清理；四张表原有记录指纹一致，原项目源码、配置、Git HEAD 和工作区状态一致 |
+
+该轮使用当前源码的工作区副本、JDK 21、Maven 3.9.16 和已有依赖缓存运行测试。自动化测试使用独立 MySQL 测试环境；对运行中服务的页面与接口验收使用专用临时账号和业务记录。通过范围包括登录、设备增改分页、预约创建/查询/审批/冲突/拒绝/取消、工单提交/受理/完成、状态筛选及用户数据隔离。
+
+本轮未认证 390px 窄屏：设置视口后实际宽度仍为 1280px；未注入 15 秒请求超时或断网；未验证无缓存的新机器冷启动、Unix Wrapper 或公网部署。不能将这些项目写成通过。控制台采集未出现 warn/error 消息，不等于所有网络请求均返回 200。详细范围见[前端说明](docs/FRONTEND_GUIDE.md#最近一次复验2026-10-30)和[发布说明](docs/GITHUB_RELEASE.md)。
+
+2026-10-30 的安全修订、匿名历史处理及本轮公开内容准备均没有改变业务或测试代码，也没有再次运行上述测试。以上为该日已记录的功能复验摘要，不把后续文档核对或历史身份验证计作业务测试。原始日志、XML、Token、私有配置、匿名化报告及提交ID映射不作为公开附件。
 
 全量测试前提与已知限制：
 
@@ -216,10 +269,21 @@ mvn test
 .\mvnw.cmd test '-Dtest=JwtAuthenticationIntegrationTest,JwtUtilTest'
 ```
 
-Surefire 结果位于 `target/surefire-reports/`，后一次运行会刷新同名报告。查看本次交付报告时应区分默认与全开两次执行，不能把默认 BUILD SUCCESS 等同于 50 项全部执行。
+Surefire 结果位于 `target/surefire-reports/`，后一次运行会刷新同名报告。查看本次交付报告时应区分默认与全开两次执行，不能把默认 BUILD SUCCESS 等同于 60 项全部执行。
 
-## Git 与交付边界
+## 兼容变化与已知边界
 
-已核查 `.gitignore` 忽略本地 `application.properties`、`.env`、本地配置、IDE 文件、`target/`、日志、测试运行态和生成报告；安全的 `application-example.properties` 与 Wrapper 文件保留在版本管理中。新增 `README.md`、`schema.sql`、`DEV-030_DELIVERY_REPORT.md` 可纳入版本管理。
+- `POST /reservations` 由早期的 HTTP 200 + 整数 1 改为 **HTTP 201 + 保存后的预约对象**，并返回 `Location: /reservations/{id}`。旧请求集合应改为读取响应 JSON 的 `id`。
+- 当前没有 Swagger/OpenAPI 页面、统一响应封装、刷新令牌或服务端注销机制。前端退出仅清除当前标签页凭据。
+- 页面是同源静态资源，需要通过运行中的 Spring Boot 访问，不能双击 HTML 或仅放到静态托管服务后就获得完整功能。
+- 新空库没有共享默认账号；注册得到 USER，ADMIN 由数据库管理员对自己控制的专用账号配置。
+- 维修工单列表目前没有服务端分页；窄屏表格仍可继续优化。
+- 全量测试仍依赖本地配置、MySQL 权限和 USER id=1；默认测试成功不代表真实数据库并发已在当前机器复验。
 
-当前还有此前任务留下的未跟踪报告和 `verification/` 材料；不要未经逐项审查就 `git add .`。本次没有执行提交、推送或公开仓库操作；待用户确认具体文件后再处理。交付后的系统学习与面试训练不属于本次代码/文档整理范围。
+## 版本管理与分发
+
+提交源码、测试、Maven Wrapper、配置示例、纯结构脚本和 `docs/`。本地 `application.properties`、开发/生产私有配置、IDE 私有运行配置、环境变量文件、构建产物、日志、备份和验证运行目录均不纳入默认上传范围。忽略规则保留安全的 `application-example.properties` 和纯结构 `schema.sql`，不统一忽略所有 SQL。历史材料仍保留在本机；`.gitignore` 不会阻止配置进入构建产物，也不保护网页拖拽或手工压缩上传。
+
+根目录 `DEV-030_DELIVERY_REPORT.md` 保留当时的历史交付事实，阅读当前功能和测试时以本 README 及最新源码为准。公开说明不附身份替换前的提交标识或旧新对照表。
+
+不要把整个本地文件夹直接拖到 GitHub 上传：网页上传不会替你执行本地 Git 忽略规则。使用 Git 的文件清单，或使用发布前生成的干净源码包。步骤与实际验证范围见 [GitHub 发布说明](docs/GITHUB_RELEASE.md)。
