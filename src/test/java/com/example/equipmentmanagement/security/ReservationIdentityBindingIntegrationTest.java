@@ -197,8 +197,8 @@ class ReservationIdentityBindingIntegrationTest {
     private void createAndCheck(String token, String suppliedUserId, int offset, int expectedUserId) throws Exception {
         int previousCount = rowCount();
         MvcResult response = reservationPost(token, suppliedUserId, offset);
-        assertStatus(200, response);
-        assertEquals("1", response.getResponse().getContentAsString(), "Endpoint returns affected rows, not the new id");
+        assertStatus(201, response);
+        assertTrue(response.getResponse().getHeader("Location").startsWith("/reservations/"));
         assertEquals(previousCount + 1, rowCount());
         LocalDateTime from = start.plusHours(offset);
         var rows = jdbc.queryForList("SELECT id,user_id,status FROM reservation WHERE device_id=? AND start_time=?",
@@ -213,7 +213,7 @@ class ReservationIdentityBindingIntegrationTest {
         assertEquals(from, mapped.getStartTime());
         assertEquals(from.plusHours(1), mapped.getEndTime());
         assertEquals("PENDING", mapped.getStatus());
-        System.out.println("IDENTITY_RESULT HTTP 200: deviceId=" + deviceId + ", requested userId="
+        System.out.println("IDENTITY_RESULT HTTP 201: deviceId=" + deviceId + ", requested userId="
                 + suppliedUserId + ", saved userId=" + expectedUserId + ", status=PENDING, start=" + from);
     }
 

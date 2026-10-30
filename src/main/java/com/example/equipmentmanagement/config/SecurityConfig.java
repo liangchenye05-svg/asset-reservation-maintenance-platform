@@ -39,6 +39,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Preserve MVC/filter errors during the container's error dispatch.
                         .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
+                        .requestMatchers(HttpMethod.GET, "/", "/index.html", "/assets/**", "/favicon.svg").permitAll()
                         .requestMatchers(
                                 "/users/register",
                                 "/users/login"
@@ -47,6 +48,11 @@ public class SecurityConfig {
                                 HttpMethod.PUT,
                                 "/reservations/*/approve"
                         ).hasRole("ADMIN")
+                        .requestMatchers(
+                                HttpMethod.PUT,
+                                "/reservations/*/reject"
+                        )
+                        .hasRole("ADMIN")
                         .requestMatchers(
                                 HttpMethod.POST,
                                 "/devices"

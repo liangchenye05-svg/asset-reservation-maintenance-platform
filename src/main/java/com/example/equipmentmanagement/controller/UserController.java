@@ -20,6 +20,12 @@ public class UserController {
         this.userService = userService;
     }
 
+    @org.springframework.web.bind.annotation.GetMapping("/me")
+    public com.example.equipmentmanagement.dto.CurrentUserResponse currentUser(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal Integer currentUserId) {
+        return userService.currentUser(currentUserId);
+    }
+
     @PostMapping("/register")
     public int registerUser(@RequestBody RegisterRequest request) {
         return userService.register(request);

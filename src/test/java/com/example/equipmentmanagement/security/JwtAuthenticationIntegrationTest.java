@@ -197,6 +197,27 @@ class JwtAuthenticationIntegrationTest {
         assertNull(servletContext.getFilterRegistration("jwtAuthenticationFilter"));
     }
 
+    @Test
+    void frontendAssetsArePublicButApisRemainProtected() throws Exception {
+        for (String path : List.of("/", "/index.html", "/assets/app.js", "/assets/app.css", "/favicon.svg"))
+            assertEquals(200, get(path, null), path);
+        assertEquals(401, get("/users/me", null));
+        assertEquals(401, get("/devices/page?page=1&pageSize=8", null));
+    }
+
+    @Test
+    void currentUserResponseNeverIncludesPasswordHash() throws Exception {
+        User user = new User(); user.setId(1); user.setRole("USER"); user.setUsername("fixture");
+        user.setPasswordHash("private-fixture-hash"); when(userMapper.selectById(1)).thenReturn(user);
+        var request = HttpRequest.newBuilder(URI.create("http://localhost:"+port+"/users/me"))
+            .header("Authorization", "Bearer "+jwtUtil.generateToken(1)).GET().build();
+        var response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode());
+        var json = tools.jackson.databind.json.JsonMapper.builder().build().readTree(response.body());
+        assertEquals(3, json.size()); assertEquals("fixture", json.get("username").asText());
+        assertFalse(json.has("passwordHash")); assertFalse(response.body().contains("private-fixture-hash"));
+    }
+
     @Configuration(proxyBeanMethods = false)
     @EnableAutoConfiguration(excludeName = {
             "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration",

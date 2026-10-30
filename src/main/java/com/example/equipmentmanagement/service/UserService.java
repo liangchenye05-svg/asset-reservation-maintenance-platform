@@ -65,6 +65,12 @@ public class UserService {
 
     }
 
+    public com.example.equipmentmanagement.dto.CurrentUserResponse currentUser(Integer id) {
+        User user = userMapper.selectById(id);
+        if (user == null) throw new org.springframework.security.access.AccessDeniedException("用户身份无效");
+        return new com.example.equipmentmanagement.dto.CurrentUserResponse(user.getId(), user.getUsername(), user.getRole());
+    }
+
     public String login(LoginRequest request) {
         if(request==null){
             throw new IllegalArgumentException("登录信息不存在");

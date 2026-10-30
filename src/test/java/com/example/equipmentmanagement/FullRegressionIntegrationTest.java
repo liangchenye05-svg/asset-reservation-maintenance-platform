@@ -99,8 +99,9 @@ public class FullRegressionIntegrationTest {
  int newDevice()throws Exception {String code="test-"+(++serial);expect("device create","POST","/devices",tx==null?tokens.get(admin):tx,deviceJson(code),200);return jdbc.queryForObject("SELECT id FROM device WHERE device_code=?",Integer.class,code);}
  String reservationJson(int d,LocalDateTime s,LocalDateTime e){return JSON.writeValueAsString(Map.of("deviceId",d,"userId",b,"status","APPROVED","startTime",s.toString(),"endTime",e.toString()));}
  int reservation(int d,LocalDateTime s,LocalDateTime e,String token)throws Exception {
-  expect("reservation create","POST","/reservations",token,reservationJson(d,s,e),200);
-  int id=jdbc.queryForObject("SELECT MAX(id) FROM reservation WHERE device_id=?",Integer.class,d);
+  var created=expect("reservation create","POST","/reservations",token,reservationJson(d,s,e),201);
+  int id=JSON.readTree(created.body()).get("id").asInt();
+  assertEquals("/reservations/"+id,created.headers().firstValue("Location").orElseThrow());
   assertEquals("PENDING",state("reservation",id));assertEquals(jwt.parseToken(token),jdbc.queryForObject("SELECT user_id FROM reservation WHERE id=?",Integer.class,id));return id;
  }
  String state(String table,int id){return jdbc.queryForObject("SELECT status FROM "+table+" WHERE id=?",String.class,id);}
@@ -234,6 +235,34 @@ public class FullRegressionIntegrationTest {
   jdbc.update("UPDATE users SET role='USER' WHERE id=?",admin2);
   try{expect("role demotion effective on existing JWT","PUT","/repair-orders/"+repair+"/complete",ty,null,403);}finally{jdbc.update("UPDATE users SET role='ADMIN' WHERE id=?",admin2);}
   expect("role restored effective on existing JWT","PUT","/repair-orders/"+repair+"/complete",ty,null,200);
+ }
+ @Test @Order(12) void reservationReadContractAndAuthorization()throws Exception {
+  int d=newDevice(),own=reservation(d,future,future.plusHours(1),ta),other=reservation(d,future.plusHours(2),future.plusHours(3),tb);
+  var mine=JSON.readTree(expect("own reservation page","GET","/reservations?deviceId="+d+"&userId="+b,ta,null,200).body());
+  assertEquals(1,mine.get("total").asInt());assertEquals(own,mine.get("records").get(0).get("id").asInt());
+  var all=JSON.readTree(expect("admin reservation page","GET","/reservations/page?deviceId="+d,tx,null,200).body());
+  assertEquals(2,all.get("total").asInt());assertEquals(other,all.get("records").get(0).get("id").asInt());
+  var detail=JSON.readTree(expect("owner reservation detail","GET","/reservations/"+own,ta,null,200).body());
+  assertEquals(a,detail.get("userId").asInt());assertEquals("PENDING",detail.get("status").asText());
+  expect("other owner detail forbidden","GET","/reservations/"+own,tb,null,403);
+  expect("admin detail permitted","GET","/reservations/"+own,tx,null,200);
+  expect("anonymous list","GET","/reservations",null,null,401);
+  expect("anonymous detail","GET","/reservations/"+own,null,null,401);
+  expect("missing detail","GET","/reservations/2147483647",ta,null,404);
+  for(String query:List.of("page=0","pageSize=101","pageSize=0","status=INVALID","deviceId=-1"))
+   expect("invalid page filter","GET","/reservations?"+query,ta,null,400);
+  var beyond=JSON.readTree(expect("empty high page","GET","/reservations?deviceId="+d+"&page=99",ta,null,200).body());
+  assertEquals(1,beyond.get("total").asInt());assertEquals(0,beyond.get("records").size());
+  expect("reject","PUT","/reservations/"+own+"/reject",tx,null,200);assertEquals("REJECTED",state("reservation",own));
+  var rejected=JSON.readTree(expect("status filtered","GET","/reservations?deviceId="+d+"&status=REJECTED",tx,null,200).body());assertEquals(1,rejected.get("total").asInt());
+ }
+ @Test @Order(13) void frontendAndCurrentUserContract()throws Exception {
+  var page=expect("anonymous frontend","GET","/",null,null,200);assertTrue(page.body().contains("设备协作台"));
+  for(String path:List.of("/index.html","/assets/app.css","/assets/app.js","/favicon.svg"))expect("public frontend asset","GET",path,null,null,200);
+  expect("anonymous current user","GET","/users/me",null,null,401);
+  var profile=JSON.readTree(expect("safe user profile","GET","/users/me",ta,null,200).body());
+  assertEquals(a,profile.get("id").asInt());assertEquals("USER",profile.get("role").asText());
+  assertEquals(3,profile.size());assertFalse(profile.has("passwordHash"));assertFalse(profile.has("password"));
  }
  @AfterAll void cleanupAndVerify()throws Exception {
   try{

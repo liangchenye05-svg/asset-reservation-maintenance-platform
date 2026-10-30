@@ -37,4 +37,9 @@ public class GlobalExceptionHandler {
     public ResponseEntity<String> handle(RepairOrderNotFoundException e) {
         return ResponseEntity.status(404).body(e.getMessage());
     }
+
+    @ExceptionHandler(ReservationConflictException.class)
+    public ResponseEntity<String> handle(ReservationConflictException e) {
+        return ResponseEntity.status(409).body(e.getMessage());
+    }
 }
