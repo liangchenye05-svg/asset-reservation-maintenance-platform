@@ -12,15 +12,36 @@
 - **预约审批并发一致性**：READ_COMMITTED 事务、设备行锁、加锁后重读与时间冲突检查，避免重叠预约被并发批准。
 - **状态流转约束**：携带旧状态的条件 UPDATE，结合受影响行数校验，防止重复处理和非法跳步。
 - **真实接口演示**：用户界面、管理员工作台以及业务失败提示；不依赖前端框架或 npm 构建。
-- **可核查的测试**：60 个测试方法；默认执行 26 个，另有 34 个真实 MySQL 集成测试需显式启用。
+- **可核查的测试**：64 个 Java 测试方法；默认执行 26 个，34 个原有 MySQL 集成测试及4个工单 HTTP 测试需显式启用；另有无 npm 依赖的前端测试。
 
 [页面与演示说明](docs/FRONTEND_GUIDE.md) · [架构与业务流程](docs/ARCHITECTURE.md) · [GitHub 发布说明](docs/GITHUB_RELEASE.md)
 
-## 本地交付状态（2026-10-31）
+## 历史本地交付状态（2026-10-31）
 
 四组本地交付完成后的核验快照为：**7 个本地提交、60 个已跟踪文件，工作区与暂存区干净**。这7个提交包括3个既有匿名提交和4个分组交付提交。
 
-计入本次仅修改 README 与发布说明的文档提交后，共 **8 个本地提交**，仍为 **60 个已跟踪文件**；本次提交结束后核对工作区与暂存区干净。所有提交的作者和提交者均使用 **Sweetest** 与已确认的 GitHub noreply 身份。未设置或连接远程仓库，未推送或公开项目。后续提交会改变计数，实际状态以本地只读核对结果为准。
+计入当时仅修改 README 与发布说明的文档提交后，共 **8 个本地提交**，仍为 **60 个已跟踪文件**；该次提交结束后核对工作区与暂存区干净。所有提交的作者和提交者均使用 **Sweetest** 与已确认的 GitHub noreply 身份。未设置或连接远程仓库，未推送或公开项目。后续提交会改变计数，实际状态以本地只读核对结果为准。
+
+## Day 13 工单筛选交付（2026-11-02）
+
+维修页面已接入后端状态筛选，保留原有 JWT 和 USER/ADMIN 数据隔离；选择全部时省略 status 参数。新增前端事件测试及可选启用的真实 HTTP 集成测试，未修改后端业务源码或数据库结构。
+
+本次五文件交付提交后，本地历史共 **9 个提交、62 个已跟踪文件**，工作区和暂存区已核对干净。此前8个匿名提交保持原样，新提交继续使用 Sweetest 与已确认的 GitHub noreply 身份。未连接远程、推送或公开项目。下方2026-10-31交付说明及发布说明保留为历史快照。
+
+本轮验证环境为 Windows、JDK 21、Maven 3.9.16、Node.js 内置测试运行器、MySQL 8/InnoDB，使用离线依赖、随机本地 HTTP 端口和独立测试数据库：
+
+| 实际验证 | 结果 |
+|---|---|
+| 前端逻辑测试 | 5通过，1个需真实服务的用例在独立执行时跳过，随后在 HTTP 集成中执行通过 |
+| 新增工单 HTTP 集成 | 4通过、0失败、0跳过；覆盖两个 USER、无工单 USER、ADMIN及实际 app.js 事件请求 |
+| 默认 Java 测试 | 64项中26通过、38跳过，无失败或错误 |
+| 原有完整 Java 回归 | 原有60项通过；本轮 Maven 共64项、4跳过，跳过的是已单独通过的新增4项 |
+
+用户于本次交付前提供真实浏览器验收：选择 COMPLETED，`GET /repair-orders?status=COMPLETED` 返回200并展示1条已完成工单；选择全部，`GET /repair-orders` 返回200并展示4条工单。这是该账号、该时刻的数据快照，不是每次运行固定的条数，也不计入自动化方法数。本轮自动化重验与该浏览器记录分别列示，未声称重新执行浏览器人工操作。
+
+复跑前端测试：`node --test src/test/frontend/repair-status.test.cjs`。新增 HTTP 测试：`mvn test -Dtest=RepairStatusHttpIntegrationTest -Drepair.status.it=true`，需 Node 可用，并在本地进程环境提供 DB_USERNAME、DB_PASSWORD 和仅指向本地 MySQL 服务、以 `/` 结尾且不含数据库名的 DAY12_DB_BASE；使用安全示例配置私有运行环境。测试创建随机 day12_ 数据库与合成账号，使用随机测试 JWT，不读写日常业务记录。旧全量回归仍按下文三个显式开关启用，必须指向专用测试环境。
+
+未验证：新增浏览器布局/窄屏验收、真实断网与15秒超时注入、全新机器冷启动、Unix Wrapper、公网部署。模拟网络失败测试不能代替真实断网验收。
 
 ## 页面预览
 
@@ -75,7 +96,7 @@ schema.sql       手动导入的纯表结构脚本
 | 设备台账 | 按 ID、状态、分页查询；管理员新增、修改、删除。分页按 ID 升序，页码从 1 开始，`pageSize` 为 1–100。新增设备状态由数据库默认设为 `AVAILABLE`；修改接口仅修改名称、位置、型号，不修改设备编码或状态。被外键引用的设备删除返回 409。 |
 | 设备预约 | 当前登录用户创建预约，初始 `PENDING`；管理员批准为 `APPROVED` 或拒绝为 `REJECTED`；支持分页、状态/设备筛选、按归属查询详情；本人或管理员在开始时间前可取消 `PENDING` / `APPROVED` 预约，转为 `CANCELLED`。冲突只计算同设备的 `APPROVED` 记录，条件为 `start_time < 新结束时间 AND end_time > 新开始时间`，因此首尾相接允许，多个重叠待审批申请可能共存。审批与取消使用事务、设备行锁及条件更新。 |
 | 用户认证 | 注册、BCrypt 密码散列、登录签发 JWT；注册固定普通用户角色，不接受客户端指定 ADMIN。JWT subject 保存用户 ID；每次认证读取数据库中的当前用户与角色。示例过期时间为 3,600,000 毫秒（1 小时）。 |
-| 维修工单 | 当前用户报修，初始 `PENDING`；管理员受理为 `PROCESSING`，再完成为 `COMPLETED`；带旧状态条件的更新防止并发重复流转。USER 列表仅本人、详情按归属校验；ADMIN 可查询全部。后端支持可选 `status` 筛选，列表按 ID 倒序；当前 Web 页面仍在获取列表后于浏览器内筛选。 |
+| 维修工单 | 当前用户报修，初始 `PENDING`；管理员受理为 `PROCESSING`，再完成为 `COMPLETED`；带旧状态条件的更新防止并发重复流转。USER 列表仅本人、详情按归属校验；ADMIN 可查询全部。后端支持可选 `status` 筛选，列表按 ID 倒序；Web 页面按所选状态调用后端接口筛选。 |
 
 预约和工单的创建人由服务端当前身份确定，不能通过请求中的 `userId` 冒用他人。预约、工单初始状态均不由客户端决定。已提供预约列表、详情和拒绝接口；当前没有工单取消、用户管理或角色提升 API。
 
@@ -208,7 +229,7 @@ java -jar target\equipment-management-0.0.1-SNAPSHOT.jar --server.address=127.0.
 | `PUT /repair-orders/{id}/process` | ADMIN | 路径工单 ID，无需请求体 | 整数 `1` |
 | `PUT /repair-orders/{id}/complete` | ADMIN | 路径工单 ID，无需请求体 | 整数 `1` |
 
-`GET /repair-orders` 不传 `status` 时返回当前身份可访问的全部工单；传入 `PENDING`、`PROCESSING` 或 `COMPLETED` 时只返回该状态。参数区分大小写，未知值、小写、空字符串（`status=`）和空白值均返回 HTTP 400，正文为“状态不合法”；合法状态没有匹配记录时返回 HTTP 200 和 `[]`。筛选不能扩大普通用户的数据范围。当前页面的工单下拉框仍使用浏览器内筛选，尚未把该参数发送给后端；服务端分页和设备筛选尚未实现。
+`GET /repair-orders` 不传 `status` 时返回当前身份可访问的全部工单；传入 `PENDING`、`PROCESSING` 或 `COMPLETED` 时只返回该状态。参数区分大小写，未知值、小写、空字符串（`status=`）和空白值均返回 HTTP 400，正文为“状态不合法”；合法状态没有匹配记录时返回 HTTP 200 和 `[]`。筛选不能扩大普通用户的数据范围。工单下拉框将所选 PENDING、PROCESSING、COMPLETED 作为 status 参数发送给后端；选择全部状态时省略该参数，列表与数量直接使用后端响应。服务端分页和设备筛选尚未实现。
 
 除预约创建接口外，其余写接口的整数 `1` 是受影响行数，**不是新记录 ID**；没有统一的 `{code,message,data}` 响应封装。预约创建返回201和资源Location。查询设备列表/工单列表可以获得相应 ID；预约创建已返回新记录ID，预约分页及详情可通过API查询，无需手工SQL获取预约ID。
 
@@ -221,12 +242,12 @@ java -jar target\equipment-management-0.0.1-SNAPSHOT.jar --server.address=127.0.
 在项目根目录执行。PowerShell 中将 `-D...` 参数整体加引号：
 
 ```powershell
-# 默认：26 项实际执行，34 项按条件跳过
+# 默认：26 项实际执行，38 项按条件跳过
 mvn test
 # 使用 Wrapper 的等价入口
 .\mvnw.cmd test
 
-# 全部启用：需满足后述数据库前提
+# 原有完整回归：60项执行，新增4项工单测试按条件跳过；需满足后述数据库前提
 .\mvnw.cmd test '-Dfull.regression.it=true' '-Dreservation.identity.it=true' '-Dreservation.cancel.it=true'
 ```
 
@@ -239,11 +260,12 @@ mvn test
 | `FullRegressionIntegrationTest` | 13 | 0 | 真实 HTTP + 独立 MySQL 库；`full.regression.it=true` |
 | `ReservationIdentityBindingIntegrationTest` | 5 | 0 | MockMvc + 配置的真实 MySQL 库，事务回滚；`reservation.identity.it=true` |
 | `ReservationCancelOwnershipIntegrationTest` | 16 | 0 | 真实 HTTP + 独立 MySQL 库；`reservation.cancel.it=true` |
-| **合计** | **60** | **26** | **默认跳过 34；三开关全开才执行 60** |
+| `RepairStatusHttpIntegrationTest` | 4 | 0 | 真实 HTTP + 新建 MySQL 库 + Node 前端事件；`repair.status.it=true` |
+| **合计** | **64** | **26** | **默认跳过38；原三开关执行60，新增工单套件单独执行4** |
 
-当前源码共 60 个测试方法。默认命令执行 26 个、跳过 34 个；全量命令需满足下列数据库前提。根目录 DEV-030 报告保留的是此前 50 项测试的历史记录，不能作为当前测试数量。
+当前源码共64个 Java 测试方法。默认命令执行26个、跳过38个；原有全量命令执行60个、跳过新增4个，工单套件另行显式启用。数据库测试需满足下列前提。根目录 DEV-030 报告保留的是此前 50 项测试的历史记录，不能作为当前测试数量。
 
-### 最新自动化复验与本地交付核验（2026-10-30—2026-10-31）
+### 历史自动化复验与本地交付核验（2026-10-30—2026-10-31）
 
 | 范围 | 本地交付阶段实际结果 |
 | --- | --- |

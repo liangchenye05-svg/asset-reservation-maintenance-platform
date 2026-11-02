@@ -85,9 +85,8 @@
         const result=await api(`/reservations?page=${state.page}&pageSize=8&status=${encodeURIComponent(state.status)}`);
         html=head(admin()?'全部预约':'我的预约',admin()?'查看所有用户的预约记录，前往审批工作台处理申请。':'这里仅展示当前账号的预约记录。')+`<div class="panel"><div class="panel-head"><div><h2>预约记录</h2><small>按创建顺序倒序显示</small></div><div class="toolbar"><label class="muted" for="status-filter" style="font-size:11px">状态</label><select id="status-filter" class="filter"><option value="">全部状态</option>${['PENDING','APPROVED','REJECTED','CANCELLED'].map(s=>`<option value="${s}" ${s===state.status?'selected':''}>${labels[s]}</option>`).join('')}</select></div></div>${reservationTable(result.records)}${pager(result)}</div>`;
       } else if(state.view==='repairs') {
-        const records=await api('/repair-orders');
-        const filtered=state.status?records.filter(r=>r.status===state.status):records;
-        html=head('维修工单',admin()?'查看全部工单，处理待受理及维修中的设备问题。':'查看我提交的问题及管理员处理进度。')+`<div class="panel"><div class="panel-head"><div><h2>${admin()?'全部维修工单':'我的报修记录'}</h2><small>共 ${filtered.length} 条${state.status?' · 已筛选':''}</small></div><div class="toolbar"><select aria-label="工单状态" id="status-filter" class="filter"><option value="">全部状态</option>${['PENDING','PROCESSING','COMPLETED'].map(s=>`<option value="${s}" ${s===state.status?'selected':''}>${labels[s]}</option>`).join('')}</select></div></div>${repairTable(filtered,admin())}</div>`;
+        const records=await api(`/repair-orders${state.status?`?status=${encodeURIComponent(state.status)}`:''}`);
+        html=head('维修工单',admin()?'查看全部工单，处理待受理及维修中的设备问题。':'查看我提交的问题及管理员处理进度。')+`<div class="panel"><div class="panel-head"><div><h2>${admin()?'全部维修工单':'我的报修记录'}</h2><small>共 ${records.length} 条${state.status?' · 已筛选':''}</small></div><div class="toolbar"><select aria-label="工单状态" id="status-filter" class="filter"><option value="">全部状态</option>${['PENDING','PROCESSING','COMPLETED'].map(s=>`<option value="${s}" ${s===state.status?'selected':''}>${labels[s]}</option>`).join('')}</select></div></div>${repairTable(records,admin())}</div>`;
       } else {
         if(!admin())throw new Error('当前账号没有管理员权限。');
         const [reservations,repairs,devices]=await Promise.all([api(`/reservations?page=${state.page}&pageSize=8&status=PENDING`),api('/repair-orders'),api('/devices/page?page=1&pageSize=1')]);
