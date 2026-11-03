@@ -1,0 +1,34 @@
+name: equipment-demo
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      TZ: Asia/Shanghai
+      MYSQL_DATABASE: equipment_demo
+      MYSQL_USER: equipment_app
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD locally}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD locally}
+    volumes:
+      - demo_mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:${APP_PORT:-8081}:8080"
+    environment:
+      TZ: Asia/Shanghai
+      SPRING_PROFILES_ACTIVE: docker
+      DB_URL: "jdbc:mysql://db:3306/equipment_demo?serverTimezone=Asia/Shanghai&characterEncoding=UTF-8&allowPublicKeyRetrieval=true&useSSL=false"
+      DB_USERNAME: equipment_app
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD locally}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET locally}
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  demo_mysql:

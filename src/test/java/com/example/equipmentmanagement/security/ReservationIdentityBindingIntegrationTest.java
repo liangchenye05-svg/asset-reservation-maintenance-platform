@@ -1,5 +1,7 @@
 package com.example.equipmentmanagement.security;
 
+import com.example.equipmentmanagement.testsupport.IsolatedDatabaseTest;
+import com.example.equipmentmanagement.testsupport.TestDatabase;
 import com.example.equipmentmanagement.entity.Reservation;
 import com.example.equipmentmanagement.entity.User;
 import com.example.equipmentmanagement.mapper.ReservationMapper;
@@ -41,11 +43,12 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
- * Opt-in test against the configured real MySQL database. MockMvc runs the real
+ * Opt-in test against a freshly created dedicated MySQL test schema. MockMvc runs the real
  * security filters, controllers, services and MyBatis mappers on the transaction
  * thread; no authentication or database bean is mocked. All fixture rows and
  * reservation INSERTs roll back. Never use andDo(print()) or print token bodies.
  */
+@IsolatedDatabaseTest
 @SpringBootTest(properties = {
         "logging.level.root=ERROR", "spring.main.banner-mode=off",
         "spring.autoconfigure.exclude=org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration"
@@ -61,7 +64,13 @@ class ReservationIdentityBindingIntegrationTest {
             Jwts.SIG.HS256.key().build().getEncoded());
 
     @DynamicPropertySource
-    static void signingKey(DynamicPropertyRegistry registry) {
+    static void signingKey(DynamicPropertyRegistry registry) throws Exception {
+        var database=TestDatabase.create("identity",TestDatabase.Init.CURRENT);
+        try(var c=database.open();var statement=c.prepareStatement("INSERT INTO users(id,username,password_hash,role) VALUES(1,'identity_fixture',?,'USER')")) {
+            statement.setString(1,new org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder().encode(UUID.randomUUID().toString()));
+            statement.executeUpdate();
+        }
+        database.register(registry,false);
         registry.add("app.jwt.secret", () -> TEST_SIGNING_KEY);
     }
     @Autowired MockMvc mvc;
@@ -91,7 +100,7 @@ class ReservationIdentityBindingIntegrationTest {
                         "AND EVENT_OBJECT_TABLE IN ('users','device','reservation')", Integer.class),
                 "Review trigger side effects before running this test");
         User user = users.selectById(1);
-        assertNotNull(user, "The real user with id=1 must exist");
+        assertNotNull(user, "The synthetic fixture with id=1 must exist");
         assertEquals("USER", user.getRole(), "Use an ordinary USER, not an administrator");
         assertEquals("PENDING", jdbc.queryForObject(
                 "SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() " +

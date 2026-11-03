@@ -3,6 +3,9 @@ package com.example.equipmentmanagement.entity;
 import java.time.LocalDateTime;
 
 public class Device {
+    private boolean maintenanceRestoreBlocked;
+    public boolean isMaintenanceRestoreBlocked() { return maintenanceRestoreBlocked; }
+    public void setMaintenanceRestoreBlocked(boolean value) { maintenanceRestoreBlocked=value; }
     private Integer id;
    private String deviceCode;
     private String name;

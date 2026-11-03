@@ -71,6 +71,8 @@ public class SecurityConfig {
                         .hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/repair-orders/*/complete")
                         .hasRole("ADMIN")
+                        .requestMatchers(HttpMethod.GET, "/repair-orders/*/maintenance-impact")
+                        .hasRole("ADMIN")
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(

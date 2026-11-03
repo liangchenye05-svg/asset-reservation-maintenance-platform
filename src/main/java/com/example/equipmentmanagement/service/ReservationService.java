@@ -56,7 +56,7 @@ public class ReservationService {
         return reservation;
     }
 
-    @Transactional
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public Reservation createReservationRecord(Reservation reservation) {
         createReservation(reservation);
         Reservation saved = reservationMapper.selectById(reservation.getId());
@@ -64,6 +64,7 @@ public class ReservationService {
         return saved;
     }
 
+    @Transactional(isolation = Isolation.READ_COMMITTED)
     public int createReservation(Reservation reservation){
         if (reservation==null){
             throw new IllegalArgumentException("预约信息不能为空");
@@ -84,10 +85,12 @@ public class ReservationService {
         if(!reservation.getStartTime().isBefore(reservation.getEndTime())){
             throw new IllegalArgumentException("时间信息不合法");
         }
-            Device device =deviceMapper.getDeviceById(reservation.getDeviceId());
+            Device device =deviceMapper.selectByIdForUpdate(reservation.getDeviceId());
          if(device==null){
              throw new DeviceNotFoundException("设备不存在");
          }
+         if ("MAINTENANCE".equals(device.getStatus()))
+             throw new ReservationConflictException("设备维修中，暂不能申请预约");
 
          int conflicts=reservationMapper.countConflicts(reservation.getDeviceId(),reservation.getStartTime(),reservation.getEndTime());
          if(conflicts>0){
@@ -130,6 +133,9 @@ return rows;
         if(device==null){
             throw new DeviceNotFoundException("设备不存在");
         }
+
+        if ("MAINTENANCE".equals(device.getStatus()))
+            throw new ReservationConflictException("设备维修中，暂不能批准预约");
 
         reservation=reservationMapper.selectById(id);
         if(reservation==null){

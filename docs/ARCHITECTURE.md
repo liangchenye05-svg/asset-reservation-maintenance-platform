@@ -1,55 +1,25 @@
-# 架构与业务流程
-
-## 请求链路
+# V3架构与职责
 
 ```mermaid
 flowchart LR
-    Web[HTML / CSS / JavaScript] -->|同源 HTTP + Bearer JWT| Security[JWT 过滤器与角色校验]
-    Security --> Controller[Controller / DTO]
-    Controller --> Service[Service 参数、归属、事务与状态校验]
-    Service --> Mapper[MyBatis Mapper]
+    Web[同源HTML CSS JavaScript] --> Security[JWT过滤器与角色授权]
+    Security --> Controller[Controller与入口DTO]
+    Controller --> Service[归属校验与业务事务]
+    Service --> Mapper[MyBatis绑定SQL]
     Mapper --> DB[(MySQL InnoDB)]
+    Flyway[版本化迁移 V1 V2 V3] --> DB
 ```
 
-静态页面由同一 Spring Boot 应用提供。JWT subject 为用户 ID；过滤器从数据库读取当前用户和角色。前端隐藏管理按钮只改善操作体验，实际权限由后端决定。`GET /users/me` 仅返回 id、username、role。
+Controller取得认证上下文，不接受客户端自称ADMIN或创建人。查询DTO在边界校验页码、状态、设备ID和关键词；Service流转同一查询及owner范围，不依赖前端权限。Mapper负责绑定参数与条件SQL，实体映射原update_at为API updatedAt。
 
-## 预约审批
+JwtAuthenticationFilter验证签名/subject后读取当前账号和角色；SecurityConfig约束ADMIN操作。Service对预约/工单详情和历史检查归属，USER列表与count使用同一owner条件。角色从数据库读取，不由请求体提供。
 
-```mermaid
-sequenceDiagram
-    participant A as 管理员请求
-    participant S as ReservationService
-    participant D as MySQL
-    A->>S: 批准预约
-    S->>D: 读取预约与设备 ID
-    S->>D: SELECT 设备 FOR UPDATE
-    Note over S,D: READ_COMMITTED 事务，同设备审批在此串行
-    S->>D: 重新读取预约状态
-    S->>D: 查询同设备 APPROVED 时间冲突
-    alt 状态为 PENDING 且无冲突
-        S->>D: 条件 UPDATE（原状态 PENDING）
-        S-->>A: 受影响行数 1
-    else 已处理或冲突
-        S-->>A: 业务错误
-    end
-```
+预约创建/批准/取消、维修创建/受理/完成在相关事务中锁同一设备行。审批锁后重读，排除状态已变化，再检查已有APPROVED满足start_time<新end且end_time>新start；首尾相接允许，重叠PENDING可并存。受理/完成/审批用条件UPDATE，行数不为1时拒绝重复处理。
 
-冲突区间使用 `已有开始 < 新结束 AND 已有结束 > 新开始`，因此首尾相接允许。重叠 PENDING 可以共存，但不应同时被批准。创建预约时的冲突预检查不能替代审批事务中的再次检查。
+维修采用READ_COMMITTED，锁后重读工单并清理Mapper本地缓存。创建写工单+CREATED；受理保存可靠首次维修前状态、设备MAINTENANCE、工单PROCESSING及PROCESSED；完成写COMPLETED历史，仅无未完成单且快照可靠、没有恢复暂停时恢复设备。异常使同事务状态/设备/历史整体回滚。
 
-## 状态与归属
+V1建原四表。V2增加历史表、status_before_maintenance和查询索引。V3新增history_complete、maintenance_restore_blocked、review_note：旧记录只做有依据的元数据分类，不生成历史；设备级暂停避免兄弟工单掩盖旧不确定性。人工核对不会解除暂停。
 
-| 对象 | 允许的流转 | 附加限制 |
-| --- | --- | --- |
-| 预约 | PENDING → APPROVED / REJECTED | 批准、拒绝仅 ADMIN；批准检查时间冲突 |
-| 预约 | PENDING / APPROVED → CANCELLED | 本人或 ADMIN；开始时间前；取消与审批协调设备锁 |
-| 工单 | PENDING → PROCESSING → COMPLETED | ADMIN；条件 UPDATE 防止重复流转 |
+工单分页按ID倒序，count与records共享权限/筛选，跨请求不提供冻结快照。OPEN仅新分页查询聚合PENDING/PROCESSING；旧数组接口兼容三状态。数据库索引覆盖常用owner/status/device过滤，关键词包含匹配不承诺大规模检索性能。
 
-预约列表、工单列表限制 USER 为本人记录；ADMIN 可查询全部。详情再次校验归属，不能靠修改前端参数越权。当前没有工单取消、用户管理或角色提升接口。
-
-## 测试层次
-
-- 无真实数据库：JWT 单元测试、预约查询服务 Mockito 测试、带真实 HTTP 的认证链测试、应用装配测试。
-- 真实 MySQL：身份绑定与归属、创建响应和查询契约、并发审批和重复取消、故障注入与回滚。
-- 默认执行 26 项；34 项数据库集成测试通过三个系统属性显式启用。集成测试的数据库和权限前提见 README。
-
-本文描述当前实现；不把尚未开发的能力列为完成项。
+前端使用真实接口，保留轻量技术；设备目录关联与搜索仍收集授权目录后浏览器处理。未引入缓存/队列/分布式事务。测试证据与数量统一看[TESTING](TESTING.md)，不将历史分批结果累加为当前通过总数。

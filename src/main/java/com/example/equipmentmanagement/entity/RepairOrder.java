@@ -3,6 +3,12 @@ package com.example.equipmentmanagement.entity;
 import java.time.LocalDateTime;
 
 public class RepairOrder {
+    private boolean historyComplete;
+    private boolean manualReviewRequired;
+    public boolean isHistoryComplete() { return historyComplete; }
+    public void setHistoryComplete(boolean value) { historyComplete=value; }
+    public boolean isManualReviewRequired() { return manualReviewRequired; }
+    public void setManualReviewRequired(boolean value) { manualReviewRequired=value; }
     private Integer id;
     private Integer deviceId;
     private Integer userId;

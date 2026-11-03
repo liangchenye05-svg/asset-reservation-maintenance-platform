@@ -1,6 +1,7 @@
 package com.example.equipmentmanagement.security;
 
 import com.example.equipmentmanagement.EquipmentManagementApplication;
+import com.example.equipmentmanagement.testsupport.IsolatedDatabaseTest;
 import com.example.equipmentmanagement.util.JwtUtil;
 import com.sun.net.httpserver.HttpServer;
 import org.springframework.boot.SpringApplication;
@@ -34,18 +35,22 @@ public class ApifoxVerificationHarness {
         Map<String,Object> r=new LinkedHashMap<>();raw.forEach((k,v)->r.put(k,v instanceof Number?v:v.toString()));return r;
     }
     public static void main(String[] args) throws Exception {
-        Files.createDirectories(DIR);
+        if(!Boolean.getBoolean("apifox.harness.it")) throw new IllegalStateException("Explicit apifox.harness.it=true opt-in required");
         Map<String,Object> settings=new HashMap<>();
         ReservationCancelOwnershipIntegrationTest.isolatedDatabase((k,v)->settings.put(k,v.get()));
+        Files.createDirectories(DIR);
         settings.put("server.port","0");settings.put("server.address","127.0.0.1");settings.put("logging.level.root","ERROR");settings.put("spring.main.banner-mode","off");
         settings.put("spring.autoconfigure.exclude","org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration");
         settings.forEach((k,v)->System.setProperty(k,v.toString()));
         HttpServer observer=null; ExecutorService observerThreads=Executors.newFixedThreadPool(2);
         int cliExit=1; List<String> tokens=new ArrayList<>(); Path runtime=DIR.resolve("runtime-local.json");
-        try(var ctx=SpringApplication.run(EquipmentManagementApplication.class)) {
+        var application=new SpringApplication(EquipmentManagementApplication.class);
+        application.setAdditionalProfiles("isolated-test");
+        application.addInitializers(new IsolatedDatabaseTest.Initializer());
+        try(var ctx=application.run()) {
             JdbcTemplate jdbc=ctx.getBean(JdbcTemplate.class);JwtUtil jwt=ctx.getBean(JwtUtil.class);
             String schema=jdbc.queryForObject("SELECT DATABASE()",String.class);
-            if(!schema.matches("dev027_[a-f0-9]{32}"))throw new IllegalStateException("Must use independent test schema");
+            if(!schema.equals(ReservationCancelOwnershipIntegrationTest.targetDatabase.schema()))throw new IllegalStateException("Must use independent test schema");
             String pass=UUID.randomUUID().toString(),hash=new BCryptPasswordEncoder().encode(pass);
             int a=insert(jdbc,"INSERT INTO users(username,password_hash,role) VALUES (?,?,?)","apifox-a",hash,"USER");
             int b=insert(jdbc,"INSERT INTO users(username,password_hash,role) VALUES (?,?,?)","apifox-b",hash,"USER");
@@ -88,11 +93,10 @@ public class ApifoxVerificationHarness {
             for(int id:IDS)log("FINAL "+JSON.writeValueAsString(row(jdbc,id)));
             String expected[]={"CANCELLED","CANCELLED","CANCELLED","CANCELLED","APPROVED","PENDING","APPROVED","CANCELLED","PENDING"};
             for(int i=0;i<IDS.size();i++)if(!expected[i].equals(row(jdbc,IDS.get(i)).get("status")))throw new IllegalStateException("Final SQL state mismatch at fixture "+IDS.get(i));
-            Properties p=new Properties();try(var in=Files.newInputStream(Path.of("src/main/resources/application.properties"))){p.load(in);}
             var sourceField=ReservationCancelOwnershipIntegrationTest.class.getDeclaredField("ORIGINAL");sourceField.setAccessible(true);
             @SuppressWarnings("unchecked") Map<String,String> original=(Map<String,String>)sourceField.get(null);
             var method=ReservationCancelOwnershipIntegrationTest.class.getDeclaredMethod("fingerprint",Connection.class,String.class);method.setAccessible(true);
-            try(Connection source=DriverManager.getConnection(p.getProperty("spring.datasource.url"),resolve(p.getProperty("spring.datasource.username")),resolve(p.getProperty("spring.datasource.password")))) {
+            try(Connection source=ReservationCancelOwnershipIntegrationTest.sourceDatabase.open()) {
                 for(var entry:original.entrySet()) {
                     String after=(String)method.invoke(null,source,entry.getKey());if(!entry.getValue().equals(after))throw new IllegalStateException("Source data changed: "+entry.getKey());
                     log("SOURCE_UNCHANGED table="+entry.getKey()+" beforeRows="+entry.getValue().split(":")[0]+" afterRows="+after.split(":")[0]+" fingerprintMatch=true");
@@ -115,5 +119,4 @@ public class ApifoxVerificationHarness {
         }
         if(cliExit!=0)throw new IllegalStateException("Apifox CLI reported failed assertions; inspect redacted local reports");
     }
-    private static String resolve(String v){if(v!=null&&v.startsWith("${")&&v.endsWith("}")){String found=System.getenv(v.substring(2,v.length()-1));if(found==null)throw new IllegalStateException("Database credential environment absent");return found;}return v;}
 }

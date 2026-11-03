@@ -9,6 +9,10 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 @ControllerAdvice
 
 public class GlobalExceptionHandler {
+    @ExceptionHandler(RepairReviewRequiredException.class)
+    public ResponseEntity<String> handle(RepairReviewRequiredException e) {
+        return ResponseEntity.status(409).body(e.getMessage());
+    }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<String> handle(IllegalArgumentException e) {

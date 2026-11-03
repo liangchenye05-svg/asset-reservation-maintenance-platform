@@ -1,5 +1,7 @@
 package com.example.equipmentmanagement;
 
+import com.example.equipmentmanagement.testsupport.IsolatedDatabaseTest;
+import com.example.equipmentmanagement.testsupport.TestDatabase;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Encoders;
 import org.junit.jupiter.api.*;
@@ -26,32 +28,21 @@ import static org.junit.jupiter.api.Assertions.*;
  * Builds schema.sql in a newly named database; never reads or writes business rows.
  * Credentials/tokens stay in memory. Synthetic fixtures are retained for inspection.
  */
+@IsolatedDatabaseTest
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT, properties={
     "logging.level.root=OFF", "spring.main.banner-mode=off", "server.address=127.0.0.1",
     "spring.autoconfigure.exclude=org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration"})
 @EnabledIfSystemProperty(named="repair.status.it", matches="true")
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RepairStatusHttpIntegrationTest {
-    static final String SCHEMA="day12_"+UUID.randomUUID().toString().replace("-", "");
+    static String SCHEMA;
     static final JsonMapper JSON=JsonMapper.builder().build();
     @DynamicPropertySource static void database(DynamicPropertyRegistry registry) throws Exception {
-        String base=System.getenv("DAY12_DB_BASE");
-        if(base==null || !base.matches("jdbc:mysql://(localhost|127\\.0\\.0\\.1)(:[0-9]+)?/"))
-            throw new IllegalArgumentException("DAY12_DB_BASE must point to a local MySQL server without a schema");
-        String query="?serverTimezone=UTC&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true";
-        String url=base+SCHEMA+query;
-        try(var c=DriverManager.getConnection(base+query,System.getenv("DB_USERNAME"),System.getenv("DB_PASSWORD"));var s=c.createStatement()) {
-            s.executeUpdate("CREATE DATABASE `"+SCHEMA+"`");
-        }
-        // Open a NEW connection bound to the new schema before creating statements.
-        try(var c=DriverManager.getConnection(url,System.getenv("DB_USERNAME"),System.getenv("DB_PASSWORD"));var s=c.createStatement()) {
-            String ddl=Files.readString(Path.of("schema.sql")).replaceAll("(?m)^\\s*--.*$", "");
-            for(String sql:ddl.split(";")) if(!sql.isBlank()) s.execute(sql);
-        }
+        var database=TestDatabase.create("status", TestDatabase.Init.CURRENT);
+        SCHEMA=database.schema();
+        database.register(registry, false);
         String key=Encoders.BASE64.encode(Jwts.SIG.HS256.key().build().getEncoded());
-        registry.add("spring.datasource.url",()->url);
         registry.add("app.jwt.secret",()->key);
-        System.out.println("DAY12_SCHEMA="+SCHEMA);
     }
     @LocalServerPort int port;
     @Autowired JdbcTemplate jdbc;
@@ -112,6 +103,7 @@ class RepairStatusHttpIntegrationTest {
         assertEquals(Files.readString(Path.of("src/main/resources/static/assets/app.js")),script);
         for(String account:List.of("fixture_a","fixture_b","fixture_empty","fixture_admin")) {
             var process=new ProcessBuilder("node","--test","src/test/frontend/repair-status.test.cjs").redirectErrorStream(true);
+            process.environment().put("TEST_DB_SCHEMA",SCHEMA);
             process.environment().put("DAY12_BASE_URL",base());
             process.environment().put("DAY12_TOKEN",tokens.get(account));
             process.environment().put("DAY12_ROLE",account.endsWith("admin")?"ADMIN":"USER");

@@ -1,5 +1,7 @@
 package com.example.equipmentmanagement.security;
 
+import com.example.equipmentmanagement.testsupport.IsolatedDatabaseTest;
+import com.example.equipmentmanagement.testsupport.TestDatabase;
 import com.example.equipmentmanagement.config.SecurityConfig;
 import com.example.equipmentmanagement.controller.DeviceController;
 import com.example.equipmentmanagement.controller.UserController;
@@ -46,9 +48,10 @@ import static org.mockito.Mockito.*;
 
 // Embedded servlet container is essential: MockMvc does not perform Tomcat error dispatches.
 // Only database access is mocked; the JWT, security chain, controller and device service are real.
+@IsolatedDatabaseTest
 @SpringBootTest(classes = JwtAuthenticationIntegrationTest.TestApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"spring.config.location=optional:classpath:/jwt-test-empty.properties",
+        properties = {"spring.config.location=classpath:/application-isolated-test.properties",
                 "logging.level.root=ERROR", "spring.main.banner-mode=off"})
 class JwtAuthenticationIntegrationTest {
     @LocalServerPort int port;

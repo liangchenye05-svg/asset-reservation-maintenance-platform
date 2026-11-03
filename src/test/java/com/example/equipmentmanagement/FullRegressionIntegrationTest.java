@@ -1,5 +1,7 @@
 package com.example.equipmentmanagement;
 
+import com.example.equipmentmanagement.testsupport.IsolatedDatabaseTest;
+import com.example.equipmentmanagement.testsupport.TestDatabase;
 import com.example.equipmentmanagement.util.JwtUtil;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.io.Encoders;
@@ -25,6 +27,7 @@ import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Real HTTP / MySQL, structures only in a unique isolated schema. No business-row writes. */
+@IsolatedDatabaseTest
 @SpringBootTest(webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT, properties={
  "logging.level.root=OFF", "spring.main.banner-mode=off", "server.address=127.0.0.1",
  "spring.autoconfigure.exclude=org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration"})
@@ -33,32 +36,25 @@ import static org.junit.jupiter.api.Assertions.*;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class FullRegressionIntegrationTest {
  static final String KEY=Encoders.BASE64.encode(Jwts.SIG.HS256.key().build().getEncoded());
- static final String SCHEMA="dev029_"+UUID.randomUUID().toString().replace("-", "");
- static final List<String> TABLES=List.of("users","device","reservation","repair_order");
+ static String SCHEMA;
+ static final List<String> TABLES=List.of("users","device","reservation","repair_order","repair_order_history");
  static final Map<String,String> BEFORE=new LinkedHashMap<>();
  static final List<String> EVIDENCE=Collections.synchronizedList(new ArrayList<>());
- static String sourceUrl,targetUrl,dbUser,dbPassword;
+ static TestDatabase sourceDatabase, targetDatabase;
  static final JsonMapper JSON=JsonMapper.builder().build();
- @DynamicPropertySource static void database(DynamicPropertyRegistry r)throws Exception {
-  Properties p=new Properties();try(var in=Files.newInputStream(Path.of("src/main/resources/application.properties"))){p.load(in);}
-  sourceUrl=p.getProperty("spring.datasource.url");dbUser=resolve(p.getProperty("spring.datasource.username"));dbPassword=resolve(p.getProperty("spring.datasource.password"));
-  String source=sourceUrl.substring(sourceUrl.lastIndexOf('/')+1).split("\\?")[0];
-  if(!source.matches("[A-Za-z0-9_]+"))throw new IllegalStateException("Unsupported schema");
-  targetUrl=sourceUrl.substring(0,sourceUrl.lastIndexOf('/')+1)+SCHEMA+(sourceUrl.contains("?")?sourceUrl.substring(sourceUrl.indexOf('?')):"");
-  try(var c=DriverManager.getConnection(sourceUrl,dbUser,dbPassword);var s=c.createStatement()){
-   for(String t:TABLES){
-    try(var rs=s.executeQuery("SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='"+t+"'")){assertTrue(rs.next());assertEquals("InnoDB",rs.getString(1));}
-    BEFORE.put(t,fingerprint(c,t));
-   }
-   s.executeUpdate("CREATE DATABASE `"+SCHEMA+"`");c.setCatalog(SCHEMA);
-   for(String t:TABLES){String ddl;try(var rs=s.executeQuery("SHOW CREATE TABLE `"+source+"`.`"+t+"`")){rs.next();ddl=rs.getString(2);}
-    ddl=ddl.replace("CREATE TABLE `"+t+"`","CREATE TABLE `"+SCHEMA+"`.`"+t+"`").replace("`"+source+"`.","`"+SCHEMA+"`.").replaceAll("AUTO_INCREMENT=\\d+","AUTO_INCREMENT=1");s.executeUpdate(ddl);
-   }
-  }
-  evidence("ISOLATED_SCHEMA "+SCHEMA+" structures only; source="+source+" fingerprints="+BEFORE);
-  r.add("spring.datasource.url",()->targetUrl);r.add("app.jwt.secret",()->KEY);
- }
- static String resolve(String v){if(v.startsWith("${")&&v.endsWith("}")){String x=System.getenv(v.substring(2,v.length()-1));if(x==null)throw new IllegalStateException("DB environment missing");return x;}return v;}
+ @DynamicPropertySource
+    static void database(DynamicPropertyRegistry registry) throws Exception {
+        sourceDatabase=TestDatabase.create("seed", TestDatabase.Init.CURRENT);
+        try(var c=sourceDatabase.open()) {
+            for(String table:TABLES) BEFORE.put(table,fingerprint(c,table));
+        }
+        targetDatabase=TestDatabase.create("full", TestDatabase.Init.CURRENT);
+        SCHEMA=targetDatabase.schema();
+        targetDatabase.register(registry,false);
+        registry.add("app.jwt.secret",()->KEY);
+        evidence("ISOLATED_DATABASE "+SCHEMA+"; synthetic seed and target only");
+
+    }
  static String fingerprint(Connection c,String t)throws Exception {
   MessageDigest d=MessageDigest.getInstance("SHA-256");int n=0;
   try(var s=c.createStatement();var rs=s.executeQuery("SELECT * FROM "+t+" ORDER BY id")){while(rs.next()){n++;for(int i=1;i<=rs.getMetaData().getColumnCount();i++){String v=rs.getString(i);d.update((v==null?"N;":"S"+v.length()+":"+v+";").getBytes(StandardCharsets.UTF_8));}}}
@@ -168,6 +164,10 @@ public class FullRegressionIntegrationTest {
   expect("missing repair device","POST","/repair-orders",ta,"{\"deviceId\":2147483647,\"description\":\"x\"}",404);
   for(String path:List.of("/repair-orders/2147483647","/repair-orders/0","/repair-orders/abc"))expect("invalid repair detail","GET",path,ta,null,path.endsWith("2147483647")?404:400);
   for(String action:List.of("process","complete")){for(String bad:List.of("0","-1","abc","2147483648"))expect("invalid transition ID","PUT","/repair-orders/"+bad+"/"+action,tx,null,400);expect("missing transition","PUT","/repair-orders/2147483647/"+action,tx,null,404);}
+  // A pending sibling intentionally keeps the device under maintenance under the accepted policy.
+  expect("process remaining sibling","PUT","/repair-orders/"+other+"/process",tx,null,200);
+  expect("complete remaining sibling","PUT","/repair-orders/"+other+"/complete",tx,null,200);
+  assertEquals("AVAILABLE",state("device",device));
  }
  @Test @Order(6) void concurrentApprovals()throws Exception {
   for(int round=1;round<=10;round++){
@@ -178,7 +178,7 @@ public class FullRegressionIntegrationTest {
   int d=newDevice(),id=reservation(d,future,future.plusHours(1),ta);race("same reservation","device",d,"/reservations/"+id+"/approve","/reservations/"+id+"/approve");assertEquals("APPROVED",state("reservation",id));
  }
  @Test @Order(7) void concurrentRepairTransitions()throws Exception {
-  for(int round=1;round<=10;round++){int id=order(ta);for(String action:List.of("process","complete")){race("repair "+action+" round="+round,"repair_order",id,"/repair-orders/"+id+"/"+action,"/repair-orders/"+id+"/"+action);assertEquals(action.equals("process")?"PROCESSING":"COMPLETED",state("repair_order",id));}}
+  for(int round=1;round<=10;round++){int id=order(ta);for(String action:List.of("process","complete")){race("repair "+action+" round="+round,"device",device,"/repair-orders/"+id+"/"+action,"/repair-orders/"+id+"/"+action);assertEquals(action.equals("process")?"PROCESSING":"COMPLETED",state("repair_order",id));}}
  }
  void race(String label,String table,int id,String p1,String p2)throws Exception {
   try(var lock=Objects.requireNonNull(jdbc.getDataSource()).getConnection();var pool=Executors.newFixedThreadPool(2)){
@@ -268,10 +268,10 @@ public class FullRegressionIntegrationTest {
   try{
    // Delete only known tables in this generated schema. The database is retained empty for inspection.
    assertEquals(SCHEMA,jdbc.queryForObject("SELECT DATABASE()",String.class));
-   for(String t:List.of("repair_order","reservation","device","users"))jdbc.update("DELETE FROM "+t);
+   for(String t:List.of("repair_order_history","repair_order","reservation","device","users"))jdbc.update("DELETE FROM "+t);
    for(String t:TABLES)assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM "+t,Integer.class));
-   try(var c=DriverManager.getConnection(sourceUrl,dbUser,dbPassword)){for(String t:TABLES)assertEquals(BEFORE.get(t),fingerprint(c,t),"Source rows unchanged: "+t);}
-   evidence("CLEANUP isolated schema empty; source four table fingerprints unchanged="+BEFORE);
+   try(var c=sourceDatabase.open()){for(String t:TABLES)assertEquals(BEFORE.get(t),fingerprint(c,t),"Source rows unchanged: "+t);}
+   evidence("CLEANUP isolated schema empty; source five table fingerprints unchanged="+BEFORE);
   }finally{if(client!=null)client.close();Files.createDirectories(Path.of("verification/dev029"));Files.write(Path.of("verification/dev029/latest-evidence.txt"),EVIDENCE,StandardCharsets.UTF_8);}
  }
 }

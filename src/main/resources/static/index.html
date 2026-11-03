@@ -1,15 +1,19 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="description" content="设备预约与维修工单协作平台">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="设备预约、审批与维修工单协作平台">
+  <meta name="theme-color" content="#245544">
   <title>Equip · 设备协作台</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/assets/app.css">
   <script src="/assets/app.js" defer></script>
 </head>
 <body>
-  <div id="app"><div class="boot">Equip · 正在连接工作台…</div></div>
+  <a class="skip-link" href="#app">跳转到工作区</a>
+  <div id="app" tabindex="-1"><div class="boot">Equip · 正在连接工作台…</div></div>
+  <noscript><p class="boot">请启用浏览器 JavaScript 后使用工作台。</p></noscript>
   <div id="notice" role="status" aria-live="polite"></div>
   <dialog id="modal" aria-labelledby="dialog-title"></dialog>
 </body>

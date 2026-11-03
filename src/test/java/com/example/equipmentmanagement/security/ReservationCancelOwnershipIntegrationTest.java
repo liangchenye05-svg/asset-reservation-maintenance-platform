@@ -1,5 +1,7 @@
 package com.example.equipmentmanagement.security;
 
+import com.example.equipmentmanagement.testsupport.IsolatedDatabaseTest;
+import com.example.equipmentmanagement.testsupport.TestDatabase;
 import com.example.equipmentmanagement.EquipmentManagementApplication;
 import com.example.equipmentmanagement.service.ReservationService;
 import com.example.equipmentmanagement.util.JwtUtil;
@@ -37,10 +39,11 @@ import java.util.concurrent.*;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Opt-in real HTTP + real MySQL. No mock, no test transaction, no existing-row writes.
- * Creates a unique independent schema from the three source table structures only.
+ * Creates fresh schemas from versioned project SQL; never reads daily configuration or rows.
  * Cleans its committed fixture rows after verification; never drops a database.
  * Credentials and random JWT signing key stay in memory and are never printed.
  */
+@IsolatedDatabaseTest
 @SpringBootTest(classes=EquipmentManagementApplication.class,
     webEnvironment=SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties={"logging.level.root=ERROR", "spring.main.banner-mode=off",
@@ -51,64 +54,22 @@ import static org.junit.jupiter.api.Assertions.*;
 class ReservationCancelOwnershipIntegrationTest {
     private static final String KEY=Encoders.BASE64.encode(Jwts.SIG.HS256.key().build().getEncoded());
     private static final Map<String,String> ORIGINAL=new LinkedHashMap<>();
-    private static final String SCHEMA="dev027_"+UUID.randomUUID().toString().replace("-", "");
-    private static String sourceUrl, targetUrl, username, password;
+    static String SCHEMA;
+    static TestDatabase sourceDatabase, targetDatabase;
     private static boolean initialized;
     private static final List<String> EVIDENCE=Collections.synchronizedList(new ArrayList<>());
     @DynamicPropertySource
-    static void isolatedDatabase(DynamicPropertyRegistry r) throws Exception {
-        Properties p=new Properties();
-        try(var input=Files.newInputStream(Path.of("src/main/resources/application.properties"))) { p.load(input); }
-        sourceUrl=p.getProperty("spring.datasource.url");
-        username=resolve(p.getProperty("spring.datasource.username"));
-        password=resolve(p.getProperty("spring.datasource.password"));
-        String source=sourceUrl.substring(sourceUrl.lastIndexOf('/')+1).split("\\?")[0];
-        if(!source.matches("[A-Za-z0-9_]+")) throw new IllegalStateException("Unsupported source schema name");
-        String suffix=sourceUrl.contains("?")?sourceUrl.substring(sourceUrl.indexOf('?')):"";
-        targetUrl=sourceUrl.substring(0,sourceUrl.lastIndexOf('/')+1)+SCHEMA+suffix;
-        try(Connection c=DriverManager.getConnection(sourceUrl,username,password); Statement s=c.createStatement()) {
-            for(String t:List.of("users","device","reservation")) {
-                try(ResultSet rs=s.executeQuery("SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='"+t+"'")) {
-                    assertTrue(rs.next()); assertEquals("InnoDB",rs.getString(1));
-                }
-                ORIGINAL.put(t,fingerprint(c,t));
-            }
-            try(ResultSet rs=s.executeQuery("SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE() AND EVENT_OBJECT_TABLE IN ('users','device','reservation')")) {
-                rs.next(); assertEquals(0,rs.getInt(1));
-            }
-            // Source constraints are inspected before cloning the complete table definitions.
-            // No source row data is copied.
-            try(ResultSet rs=s.executeQuery("SELECT TABLE_NAME,COLUMN_NAME,REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('users','device','reservation') AND REFERENCED_TABLE_NAME IS NOT NULL")) {
-                while(rs.next()) recordEvidence("SOURCE_FK "+rs.getString(1)+"."+rs.getString(2)+" -> "+rs.getString(3));
-            }
-            s.executeUpdate("CREATE DATABASE `"+SCHEMA+"`");
-            // Clone SHOW CREATE output, including foreign keys. Switch catalog first
-            // so unqualified REFERENCES resolve within the independent schema.
-            c.setCatalog(SCHEMA);
-            for(String t:List.of("users","device","reservation")) {
-                String ddl;
-                try(ResultSet rs=s.executeQuery("SHOW CREATE TABLE `"+source+"`.`"+t+"`")) {
-                    assertTrue(rs.next()); ddl=rs.getString(2);
-                }
-                ddl=ddl.replace("CREATE TABLE `"+t+"`", "CREATE TABLE `"+SCHEMA+"`.`"+t+"`")
-                    .replace("`"+source+"`.","`"+SCHEMA+"`.")
-                    .replaceAll("AUTO_INCREMENT=\\d+", "AUTO_INCREMENT=1");
-                s.executeUpdate(ddl);
-            }
-            initialized=true;
-            recordEvidence("ISOLATED_DATABASE "+SCHEMA+" source="+source+"; structures only; no source writes");
+    static void isolatedDatabase(DynamicPropertyRegistry registry) throws Exception {
+        sourceDatabase=TestDatabase.create("seed", TestDatabase.Init.CURRENT);
+        try(var c=sourceDatabase.open()) {
+            for(String table:List.of("users","device","reservation")) ORIGINAL.put(table,fingerprint(c,table));
         }
-        r.add("spring.datasource.url",()->targetUrl);
-        r.add("app.jwt.secret",()->KEY);
-    }
-    private static String resolve(String value) {
-        if(value!=null && value.startsWith("${") && value.endsWith("}")) {
-            String name=value.substring(2,value.length()-1);
-            String found=System.getenv(name);
-            if(found==null) throw new IllegalStateException("Required database credential environment variable absent");
-            return found;
-        }
-        return value;
+        targetDatabase=TestDatabase.create("cancel", TestDatabase.Init.CURRENT);
+        SCHEMA=targetDatabase.schema();
+        targetDatabase.register(registry,false);
+        registry.add("app.jwt.secret",()->KEY);
+        recordEvidence("ISOLATED_DATABASE "+SCHEMA+"; synthetic seed and target only");
+        initialized=true;
     }
     @LocalServerPort int port;
     @Autowired JdbcTemplate jdbc;
@@ -206,7 +167,7 @@ class ReservationCancelOwnershipIntegrationTest {
     }
     private void race(String label,boolean changeOwner) throws Exception {
         int id=reservation("PENDING",future);
-        try(Connection blocker=DriverManager.getConnection(targetUrl,username,password); var pool=Executors.newSingleThreadExecutor()) {
+        try(Connection blocker=targetDatabase.open(); var pool=Executors.newSingleThreadExecutor()) {
             blocker.setAutoCommit(false);
             try(PreparedStatement ps=blocker.prepareStatement("SELECT id FROM device WHERE id=? FOR UPDATE")) {
                 ps.setInt(1,device); try(ResultSet rs=ps.executeQuery()) { assertTrue(rs.next()); }
@@ -250,11 +211,11 @@ class ReservationCancelOwnershipIntegrationTest {
         if(token==null || token.equals("") || token.equals("invalid-test-token")) assertEquals(locksBefore,probe.locks);
         else assertEquals(locksBefore+1,probe.locks);
         // Independent connection after response: reads committed state, outside HTTP transaction.
-        try(Connection c=DriverManager.getConnection(targetUrl,username,password); PreparedStatement ps=c.prepareStatement("SELECT status FROM reservation WHERE id=?")) {
+        try(Connection c=targetDatabase.open(); PreparedStatement ps=c.prepareStatement("SELECT status FROM reservation WHERE id=?")) {
             ps.setInt(1,id); try(ResultSet rs=ps.executeQuery()) { assertTrue(rs.next()); assertEquals(wanted,rs.getString(1)); }
         }
         // A new transaction must be able to acquire the device lock after every outcome.
-        try(Connection c=DriverManager.getConnection(targetUrl,username,password); Statement s=c.createStatement()) {
+        try(Connection c=targetDatabase.open(); Statement s=c.createStatement()) {
             c.setAutoCommit(false); s.execute("SET SESSION innodb_lock_wait_timeout=2");
             try(ResultSet rs=s.executeQuery("SELECT id FROM device WHERE id="+device+" FOR UPDATE")) { assertTrue(rs.next()); }
             c.rollback();
@@ -273,7 +234,7 @@ class ReservationCancelOwnershipIntegrationTest {
         return insert("INSERT INTO reservation(device_id,user_id,start_time,end_time,status) VALUES (?,?,?,?,?)",device,a,start,start.plusHours(2),status);
     }
     private int insert(String sql,Object... values) throws Exception {
-        try(Connection c=DriverManager.getConnection(targetUrl,username,password); PreparedStatement ps=c.prepareStatement(sql,Statement.RETURN_GENERATED_KEYS)) {
+        try(Connection c=targetDatabase.open(); PreparedStatement ps=c.prepareStatement(sql,Statement.RETURN_GENERATED_KEYS)) {
             for(int i=0;i<values.length;i++) ps.setObject(i+1,values[i]);
             assertEquals(1,ps.executeUpdate()); try(ResultSet rs=ps.getGeneratedKeys()) { assertTrue(rs.next()); return rs.getInt(1); }
         }
@@ -281,13 +242,13 @@ class ReservationCancelOwnershipIntegrationTest {
     private String status(int id) { return jdbc.queryForObject("SELECT status FROM reservation WHERE id=?",String.class,id); }
     @AfterAll void verifySourceUnchanged() throws Exception {
         if(client!=null) client.close();
-        if(initialized) try(Connection c=DriverManager.getConnection(sourceUrl,username,password)) {
+        if(initialized) try(Connection c=sourceDatabase.open()) {
             for(var entry:ORIGINAL.entrySet()) {
                 String after=fingerprint(c,entry.getKey());
                 assertEquals(entry.getValue(),after,"Source rows unchanged: "+entry.getKey());
                 recordEvidence("SOURCE_TABLE "+entry.getKey()+" beforeRows="+entry.getValue().split(":")[0]+" afterRows="+after.split(":")[0]+" fingerprintMatch=true");
             }
-            try (Connection target=DriverManager.getConnection(targetUrl,username,password);
+            try (Connection target=targetDatabase.open();
                  Statement clean=target.createStatement()) {
                 assertEquals(SCHEMA, target.getCatalog());
                 for (String table : List.of("reservation", "device", "users")) {
