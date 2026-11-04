@@ -4,7 +4,63 @@
 
 Java 21 · Spring Boot 4.0.8 · MyBatis · MySQL 8/InnoDB · Spring Security · JWT/BCrypt · Flyway。前端为同源HTML/CSS/JavaScript，无Vue/React或生产npm构建依赖。
 
-## 实际业务与技术重点
+## 项目功能展示
+
+以下为 V3 在独立本地环境运行时的截图，账号、设备、预约和工单均为合成演示数据。
+
+### 设备资源
+
+![普通用户的设备列表和状态](docs/images/v3/02-user-devices.png)
+
+普通用户从台账查看设备状态，并进入预约或报修入口。
+
+### 预约申请与审批
+
+![普通用户的预约记录](docs/images/v3/03-user-reservations.png)
+
+用户可以跟踪自己的申请，区分待处理与已批准预约。
+
+![管理员审批工作台](docs/images/v3/04-admin-approval.png)
+
+管理员在审批工作台核对待办。批准前，后端检查同设备的重叠时段。
+
+### 维修工单与设备联动
+
+![处理中工单及操作历史](docs/images/v3/05-repair-history.png)
+
+工单详情记录实际提交与受理。设备在受理后进入维修，仍有未完成工单时继续保持维修状态。
+
+![维修受理后的设备状态](docs/images/v3/06-device-maintenance.png)
+
+维修期间阻止新预约申请与批准。已批准预约保留，由管理员协调。
+
+### 旧工单人工核对
+
+![V3 旧工单人工核对弹窗](docs/images/v3/07-v3-legacy-review.png)
+
+缺少可靠恢复依据时暂停自动恢复。管理员填写说明后可以完成工单，设备保持现状，原有历史缺口继续标记。
+
+<details>
+<summary>查看登录页和 390px 移动端</summary>
+
+![V3 登录页](docs/images/v3/01-login.png)
+
+登录后按服务端角色进入工作台。
+
+![390px 移动端人工核对](docs/images/v3/08-mobile-390.png)
+
+在 390px 视口下，管理员仍可阅读核对提示并填写说明。
+
+</details>
+
+## 演示流程
+
+1. **USER** 在设备资源提交预约，在「我的预约」查看状态，也可以提交报修。
+2. **ADMIN** 在审批工作台处理待办，再受理维修工单并查看受影响的批准预约。
+3. **ADMIN** 完成维修。还有待处理或处理中的同设备工单时，设备继续维修；全部结束后按可靠快照判断恢复。
+4. 对需要核对的旧工单，**ADMIN** 填写说明后完成；设备保留现状，已有历史缺口继续显示。
+
+## 技术亮点
 
 | 模块 | 已实现能力 |
 | --- | --- |
@@ -41,7 +97,9 @@ schema.sql                                 当前V3空库兼容初始化脚本
 
 [架构](docs/ARCHITECTURE.md) · [维修逐层设计](docs/REPAIR_DESIGN.md) · [业务规则](docs/BUSINESS_RULES.md)
 
-## 运行、验证与演示
+## 如何体验
+
+GitHub 可直接查看源码、文档和上面的演示截图。目前没有公共在线演示服务。
 
 按[运行说明](docs/RUNNING.md)准备自己的全新演示库及环境变量，显式加载安全示例，Flyway依次执行V1/V2/V3。已有数据环境先看[迁移说明](docs/DATABASE_MIGRATIONS.md)，不能直接套用空库初始化。没有共享默认账号或管理员口令。
 
@@ -49,17 +107,20 @@ schema.sql                                 当前V3空库兼容初始化脚本
 
 [USER/ADMIN演示顺序](docs/DEMO_FLOW.md) · [前端说明](docs/FRONTEND_GUIDE.md) · [AI协作实践](docs/AI_COLLABORATION.md) · [发布边界](docs/GITHUB_RELEASE.md)
 
-## 历史页面预览
+<details>
+<summary>旧版页面存档</summary>
 
-以下四张图片为已审查的旧版本合成数据截图，**不是当前V3最新界面**，不证明新工单历史/人工核对功能已经在这些图片中展示。本轮保留原图，不新增截图。
+以下为旧版本的合成数据截图，供回顾界面演进。
 
 ![旧版本设备预览](docs/images/devices.jpg)
 ![旧版本预约预览](docs/images/reservations.jpg)
 ![旧版本管理员预览](docs/images/admin.jpg)
-[旧版登录预览](docs/images/login.jpg)。后续最新截图仅应从合成演示库产生，另行审查。
+[旧版登录预览](docs/images/login.jpg)
+
+</details>
 
 ## 已知边界
 
 无工单指派、取消/重开、附件评论、自动取消预约、刷新令牌或服务端JWT注销；无Redis、消息队列或微服务。设备目录搜索不是服务端搜索，包含关键词查询没有大数据规模性能承诺。未测量QPS、节省工时或生产用户规模。
 
-V3求职展示版本已完成本地整合及测试，公开发布状态以远程仓库为准；本说明不预先宣称推送或公开已完成。AI实际参与工程实现；人工确认业务规则并做操作验收，不宣称全部独立手写或全部已掌握。
+源码经版本与隐私审查后公开。Codex 辅助工程实现、排错与回归，开发者确认业务规则并操作独立演示环境验收。
